@@ -1,27 +1,33 @@
 import ctypes
 import logging
+import platform
 import customtkinter as ctk
 
-def set_dpi_awareness(mode):
+logging.basicConfig(level=logging.DEBUG, format="%(asctime)s - %(levelname)s - %(message)s")
+
+def set_dpi_awareness(mode: str) -> None:
+    """Sets DPI awareness based on the operating system."""
     awareness_modes = {
         "Unaware": 0,
         "System": 1,
         "Per-monitor": 2
     }
-    try:
-        ctypes.windll.shcore.SetProcessDpiAwareness(awareness_modes.get(mode, 1))
-        logging.info("Ustawiono DPI awareness na %s", mode)
-    except AttributeError as e:
-        logging.error("Błąd przy ustawianiu DPI awareness: %s", e)
+    if platform.system() == "Windows":
         try:
-            ctypes.windll.user32.SetProcessDPIAware()
-            logging.info("Ustawiono DPI awareness przez SetProcessDPIAware")
-        except Exception as e2:
-            logging.error("DPI awareness nie jest obsługiwany: %s", e2)
+            ctypes.windll.shcore.SetProcessDpiAwareness(awareness_modes.get(mode, 1))
+            logging.info("DPI awareness set to %s", mode)
+        except AttributeError as e:
+            logging.error("Error setting DPI awareness: %s", e)
+            try:
+                ctypes.windll.user32.SetProcessDPIAware()
+                logging.info("DPI awareness set using SetProcessDPIAware")
+            except Exception as e2:
+                logging.error("DPI awareness not supported: %s", e2)
 
-def detect_scaling_factor():
+def detect_scaling_factor() -> float:
+    """Detects the DPI scaling factor of the current display."""
     temp_root = ctk.CTk()
-    temp_root.geometry("800x600")  # znany rozmiar wirtualny
+    temp_root.geometry("800x600")
     temp_root.update_idletasks()
 
     real_width = temp_root.winfo_width()
@@ -32,14 +38,14 @@ def detect_scaling_factor():
     scaling_factor = (scaling_factor_x + scaling_factor_y) / 2
 
     temp_root.destroy()
-    logging.info("Wykryta skala: %.2f (X: %.2f, Y: %.2f)", scaling_factor, scaling_factor_x, scaling_factor_y)
+    logging.info("Detected scale: %.2f (X: %.2f, Y: %.2f)", scaling_factor, scaling_factor_x, scaling_factor_y)
     return scaling_factor
 
 class DPIScaler:
     MODULE_NAME = "dpi"
     DEFAULT_CONFIG = {
-        "scale_factor": 1.0,      # domyślnie brak skalowania
-        "awareness": "System"     # domyślny tryb DPI
+        "scale_factor": 1.0,
+        "awareness": "System"
     }
 
     def __init__(self, configurator):
@@ -56,5 +62,6 @@ class DPIScaler:
                 self.configurator.set(self.MODULE_NAME, "scale_factor", self.scale_factor)
         logging.info("DPIScaler: scale_factor = %.2f", self.scale_factor)
 
-    def apply_scale(self, width: int, height: int) -> tuple:
+    def apply_scale(self, width: int, height: int) -> tuple[int, int]:
+        """Applies the DPI scale factor to given dimensions."""
         return int(width * self.scale_factor), int(height * self.scale_factor)

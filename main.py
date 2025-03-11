@@ -1,61 +1,91 @@
 import sys
-import os
 import argparse
 import json
 import logging
+import platform
+import ctypes
 import customtkinter as ctk
+from pathlib import Path
 
-# Dodajemy folder modules do sys.path
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-sys.path.append(os.path.join(BASE_DIR, "modules"))
+# Base directory setup using pathlib
+BASE_DIR = Path(__file__).parent
+CONFIG_FILE = BASE_DIR / "config.json"
 
+# Importing modules
+sys.path.append(str(BASE_DIR / "modules"))
 from configurator import Configurator
 from dpi_scaler import set_dpi_awareness, DPIScaler
 
 logging.basicConfig(level=logging.DEBUG, format="%(asctime)s - %(levelname)s - %(message)s")
-CONFIG_FILE = os.path.join(BASE_DIR, "config.json")
 
-# Parsowanie argumentów CLI
-parser = argparse.ArgumentParser(description="Aplikacja wielomodułowa z obsługą DPI i konfiguracji")
-parser.add_argument("mode", choices=["run", "configuration", "diagnostics"], help="Tryb działania")
+# CLI argument parsing
+parser = argparse.ArgumentParser(description="Multi-module application with DPI and configuration support")
+parser.add_argument("mode", choices=["run", "configuration", "diagnostics"], help="Operation mode")
+
 group = parser.add_mutually_exclusive_group()
-group.add_argument("--reset-all", action="store_true", help="Resetuj całą konfigurację")
-group.add_argument("--reset-set", metavar="MODULE", help="Resetuj zestaw konfiguracji dla podanego modułu")
+group.add_argument("--reset-all", action="store_true", help="Reset all configuration")
+group.add_argument("--reset-set", metavar="MODULE", help="Reset configuration set for the given module")
 group.add_argument("--reset-set-key", nargs="+", metavar=("MODULE", "KEY", "NEW_VALUE"),
-                   help="Resetuj klucz w zestawie konfiguracji (opcjonalnie z nową wartością)")
+                   help="Reset a key in a configuration set (optionally with a new value)")
+
+# New CLI arguments for exporting/importing config
+parser.add_argument("--export-config", metavar="FILE", help="Export configuration to a JSON file")
+parser.add_argument("--import-config", metavar="FILE", help="Import configuration from a JSON file")
+
 args = parser.parse_args()
 
-# Inicjalizacja konfiguratora
+# Initialize Configurator
 configurator = Configurator(CONFIG_FILE, separate_files=False)
-
-# Rejestracja pluginu DPI
 configurator.register_plugin(DPIScaler.MODULE_NAME, DPIScaler.DEFAULT_CONFIG)
 dpi_scaler = DPIScaler(configurator)
 
-# Obsługa trybów CLI
+# Export configuration function
+def export_config(file_path: str) -> None:
+    try:
+        with open(file_path, "w") as f:
+            json.dump(configurator.config_data, f, indent=4)
+        print(f"Configuration exported to {file_path}", flush=True)
+    except Exception as e:
+        logging.error("Failed to export configuration: %s", e)
+
+# Import configuration function
+def import_config(file_path: str) -> None:
+    try:
+        with open(file_path, "r") as f:
+            configurator.config_data = json.load(f)
+        configurator.save_config()
+        print(f"Configuration imported from {file_path}", flush=True)
+    except Exception as e:
+        logging.error("Failed to import configuration: %s", e)
+
+# Handle CLI modes
 if args.mode == "configuration":
     if args.reset_all:
         configurator.reset_all()
-        print("Konfiguracja zresetowana.", flush=True)
+        print("Configuration reset.", flush=True)
         sys.exit(0)
     elif args.reset_set:
-        module_name = args.reset_set
-        configurator.reset_module(module_name)
-        print(f"Zresetowano zestaw: {module_name}", flush=True)
+        configurator.reset_module(args.reset_set)
+        print(f"Reset configuration set: {args.reset_set}", flush=True)
         sys.exit(0)
     elif args.reset_set_key:
         if len(args.reset_set_key) >= 2:
-            module_name = args.reset_set_key[0]
-            key = args.reset_set_key[1]
+            module, key = args.reset_set_key[:2]
             new_value = args.reset_set_key[2] if len(args.reset_set_key) > 2 else None
-            configurator.reset_key(module_name, key, new_value)
-            print(f"Zresetowano klucz: {key} w zestawie: {module_name}", flush=True)
+            configurator.reset_key(module, key, new_value)
+            print(f"Reset key: {key} in set: {module}", flush=True)
             sys.exit(0)
         else:
-            print("Podaj przynajmniej MODULE i KEY dla --reset-set-key", flush=True)
+            print("Provide at least MODULE and KEY for --reset-set-key", flush=True)
             sys.exit(1)
+    elif args.export_config:
+        export_config(args.export_config)
+        sys.exit(0)
+    elif args.import_config:
+        import_config(args.import_config)
+        sys.exit(0)
     else:
-        print("Aktualna konfiguracja:", flush=True)
+        print("Current configuration:", flush=True)
         print(json.dumps(configurator.config_data, indent=4), flush=True)
         sys.exit(0)
 elif args.mode == "diagnostics":
@@ -67,7 +97,7 @@ elif args.mode == "diagnostics":
     print(f"  - Virtual Screen: {root.winfo_width()}x{root.winfo_height()}", flush=True)
     sys.exit(0)
 
-# Tryb run – uruchamiamy aplikację
+# Run mode - launch application
 set_dpi_awareness(configurator.get("dpi", "awareness", "System"))
 
 class App(ctk.CTk):
@@ -75,16 +105,12 @@ class App(ctk.CTk):
         super().__init__()
         self.config = config
         self.dpi_scaler = dpi_scaler
-
-        # Ustal wirtualne wymiary z konfiguracji lub domyślne
         self.virtual_width = configurator.get("app", "window_width", 800)
         self.virtual_height = configurator.get("app", "window_height", 600)
-
-        self.title("Aplikacja z DPI i konfiguracją")
+        self.title("DPI and Configuration Application")
         self.geometry(f"{self.virtual_width}x{self.virtual_height}")
         self.after(100, self.center_window)
-
-        self.label = ctk.CTkLabel(self, text=f"Wymiary (wirtualne): {self.virtual_width}x{self.virtual_height}")
+        self.label = ctk.CTkLabel(self, text=f"Dimensions (virtual): {self.virtual_width}x{self.virtual_height}")
         self.label.pack(pady=10)
 
     def center_window(self):
@@ -92,14 +118,12 @@ class App(ctk.CTk):
         scaling_factor = configurator.get("dpi", "scale_factor", 1.0)
         target_width = self.virtual_width
         target_height = self.virtual_height
-
         screen_width = int(self.winfo_screenwidth() / scaling_factor)
         screen_height = int(self.winfo_screenheight() / scaling_factor)
-
         expected_x = int((screen_width - target_width) / 2 * scaling_factor)
         expected_y = int((screen_height - target_height) / 2 * scaling_factor)
 
-        logging.info("Centrowanie okna: %dx%d, ekran: %dx%d, skala: %.2f, x: %d, y: %d",
+        logging.info("Centering window: %dx%d, screen: %dx%d, scale: %.2f, x: %d, y: %d",
                      target_width, target_height, screen_width, screen_height, scaling_factor, expected_x, expected_y)
 
         self.geometry(f"{target_width}x{target_height}+{expected_x}+{expected_y}")
